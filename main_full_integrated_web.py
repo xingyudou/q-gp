@@ -1,4 +1,6 @@
 import os
+import threading
+from flask import Flask
 import time
 import imaplib
 import smtplib
@@ -80,10 +82,11 @@ def download_model(url, destination):
                 f.write(chunk)
     print("✅ 模型下载完成")
 
-# 下载模型
 download_model(MODEL_URL, MODEL_PATH)
 
+# =======================
 # 初始化 GPT4All
+# =======================
 try:
     model = GPT4All(MODEL_PATH)
     log("✅ AI 模型加载成功")
@@ -151,9 +154,9 @@ def generate_reply(email_content):
         return "抱歉，AI 生成失败。"
 
 # =======================
-# 主循环
+# 主循环任务
 # =======================
-if __name__ == "__main__":
+def main_loop():
     log("=== QQ 邮箱 + Telegram 自动回复服务启动 ===")
     base_interval = 30
     while True:
@@ -177,3 +180,19 @@ if __name__ == "__main__":
         check_telegram(model)
 
         time.sleep(interval)
+
+# =======================
+# Flask Web 端口（Render 需要）
+# =======================
+app = Flask(__name__)
+
+@app.route("/")
+def index():
+    return "后台任务正在运行"
+
+if __name__ == "__main__":
+    # 后台线程运行主循环
+    threading.Thread(target=main_loop, daemon=True).start()
+    # Render 默认端口
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
