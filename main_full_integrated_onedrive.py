@@ -8,7 +8,6 @@ from email.policy import default
 from gpt4all import GPT4All
 from datetime import datetime
 import requests
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # =======================
 # 环境变量配置
@@ -17,15 +16,8 @@ QQ_EMAIL = os.getenv("QQ_EMAIL")
 QQ_AUTH_CODE = os.getenv("QQ_AUTH_CODE")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-MODEL_FILE_ID = os.getenv("MODEL_FILE_ID")  # Google Drive 文件ID
-
-# =======================
-# 模型下载配置
-# =======================
+MODEL_URL = os.getenv("MODEL_URL")  # OneDrive 共享链接
 MODEL_PATH = "ggml-gpt4all-j-v1.3-groovy.bin"
-CHUNK_SIZE = 10*1024*1024
-MAX_THREADS = 4
-MAX_RETRIES = 5
 
 # =======================
 # 日志函数
@@ -37,7 +29,7 @@ def log(message):
     with open(filename, "a", encoding="utf-8") as f:
         f.write(f"[{timestamp}] {message}\n")
     print(message)
-    send_telegram(f"[{timestamp}] {message}")  # 同时推送到 Telegram
+    send_telegram(f"[{timestamp}] {message}")
 
 # =======================
 # Telegram 功能
@@ -73,64 +65,25 @@ def check_telegram(model):
         log(f"❌ Telegram 检查异常: {e}")
 
 # =======================
-# GPT4All 模型下载（多线程+重试+断点续传）
+# 模型下载（OneDrive）
 # =======================
-def get_download_url(file_id):
-    return f"https://docs.google.com/uc?export=download&id={file_id}"
-
-def download_chunk(url, start, end, filename, idx, retries=MAX_RETRIES):
-    headers = {"Range": f"bytes={start}-{end}"}
-    attempt = 0
-    while attempt < retries:
-        try:
-            r = requests.get(url, headers=headers, stream=True, timeout=60)
-            if r.status_code in (200, 206):
-                with open(filename, "r+b") as f:
-                    f.seek(start)
-                    f.write(r.content)
-                print(f"线程 {idx} 下载成功: {start}-{end}")
-                return
-            else:
-                attempt += 1
-                print(f"线程 {idx} 状态码 {r.status_code}, 重试 {attempt}/{retries}")
-        except Exception as e:
-            attempt += 1
-            print(f"线程 {idx} 异常 {e}, 重试 {attempt}/{retries}")
-    raise Exception(f"线程 {idx} 下载失败: {start}-{end}")
-
-def download_model(file_id, destination):
+def download_model(url, destination):
     if os.path.exists(destination):
-        local_size = os.path.getsize(destination)
-    else:
-        with open(destination, "wb") as f:
-            pass
-        local_size = 0
-
-    url = get_download_url(file_id)
-    r = requests.head(url, allow_redirects=True)
-    total = int(r.headers.get('Content-Length', 0))
-
-    if local_size >= total:
-        print("✅ 模型已完整存在，跳过下载")
+        print("✅ 模型已存在，跳过下载")
         return
-
-    print(f"⏳ 开始下载模型，总大小 {total/1024/1024:.2f} MB")
-    ranges = [(start, min(start+CHUNK_SIZE-1, total-1)) for start in range(local_size, total, CHUNK_SIZE)]
-    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
-        future_to_chunk = {executor.submit(download_chunk, url, start, end, destination, idx+1): (start,end)
-                           for idx, (start,end) in enumerate(ranges)}
-        for future in as_completed(future_to_chunk):
-            start,end = future_to_chunk[future]
-            try:
-                future.result()
-            except Exception as e:
-                log(f"❌ 块下载失败 {start}-{end}: {e}")
+    print(f"⏳ 开始下载模型到 {destination} ...")
+    r = requests.get(url, stream=True)
+    r.raise_for_status()
+    with open(destination, "wb") as f:
+        for chunk in r.iter_content(chunk_size=1024*1024):
+            if chunk:
+                f.write(chunk)
     print("✅ 模型下载完成")
 
-# =======================
-# 初始化 GPT4All 模型
-# =======================
-download_model(MODEL_FILE_ID, MODEL_PATH)
+# 下载模型
+download_model(MODEL_URL, MODEL_PATH)
+
+# 初始化 GPT4All
 try:
     model = GPT4All(MODEL_PATH)
     log("✅ AI 模型加载成功")
