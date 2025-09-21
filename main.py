@@ -61,4 +61,4 @@ def check_and_reply():
 if __name__ == "__main__":
     while True:
         check_and_reply()
-        time.sleep(30)  # 每 30 分钟检查一次
+        time.sleep(30)  # 每 30秒检查一次
